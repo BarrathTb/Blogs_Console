@@ -1,6 +1,6 @@
 ﻿using NLog;
-using System.Data.Common;
 using System.Linq;
+using System.ComponentModel.DataAnnotations;
 
 // See https://aka.ms/new-console-template for more information
 string path = Directory.GetCurrentDirectory() + "\\nlog.config";
@@ -9,100 +9,131 @@ string path = Directory.GetCurrentDirectory() + "\\nlog.config";
 var logger = LogManager.LoadConfiguration(path).GetCurrentClassLogger();
 logger.Info("Program started");
 
-var db = new BloggingContext();
-var blogs = db.Blogs.ToList();
-while (true)
+try
 {
-    Menu.DisplayMainMenu();
-
-
-    string option = Console.ReadLine();
-    switch (option)
+    string choice;
+    do
     {
-        case "1":
+        Console.WriteLine("Enter your selection:");
+        Console.WriteLine("1) Display all blogs");
+        Console.WriteLine("2) Add Blog");
+        Console.WriteLine("5) Delete Blog");
+        Console.WriteLine("6) Edit Blog");
+        Console.WriteLine("Enter q to quit");
+        choice = Console.ReadLine();
+        Console.Clear();
+        logger.Info("Option {choice} selected", choice);
+
+        var db = new BloggingContext();
+
+        if (choice == "1")
+        {
+            // display blogs
+            var query = db.Blogs.OrderBy(b => b.Name);
+
+            Console.WriteLine($"{query.Count()} Blogs returned");
+            foreach (var item in query)
             {
-                var blogService = new BlogServices(db);
-                var blogsList = blogService.GetBlogList();
-                foreach (var blogItem in blogsList)
-                    Console.WriteLine($"Blog: {blogItem.Name}");
-
-                break;
+                Console.WriteLine(item.Name);
             }
-        case "2":
+        }
+        else if (choice == "2")
+        {
+            // Add blog
+            Blog blog = InputBlog(db, logger);
+            if (blog != null)
             {
-                Console.WriteLine("Enter name for new blog:");
-                string blogName = Console.ReadLine();
-                var blogService = new BlogServices(db);
-                blogService.AddBlog(new Blog { Name = blogName });
-                Console.WriteLine("Blog added successfully!");
-                break;
+                //blog.BlogId = BlogId;
+                db.AddBlog(blog);
+                logger.Info("Blog added - {name}", blog.Name);
             }
-
-        case "3":
+        }
+        else if (choice == "5")
+        {
+            // delete blog
+            Console.WriteLine("Choose the blog to delete:");
+            var blog = GetBlog(db, logger);
+            if (blog != null)
             {
-                Menu.DisplaySelectBlogForPostMenu();
-                if (int.TryParse(Console.ReadLine(), out int blogId))
-                {
-                    var blogService = new BlogServices(db);
-                    var selectedBlog = blogService.GetBlog(blogId);
-
-
-                    if (selectedBlog != null)
-                    {
-                        Console.WriteLine("Enter title for new post:");
-                        string postTitle = Console.ReadLine();
-
-                        Console.WriteLine("Enter content for new post:");
-                        string postContent = Console.ReadLine();
-
-                        var postService = new PostServices(db);
-                        postService.AddPost(new Post { BlogId = blogId, Title = postTitle, Content = postContent });
-
-                        Console.WriteLine("Post added successfully!");
-                    }
-                    else
-                    {
-                        Console.WriteLine("Blog not found.");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Invalid input. Please enter a valid ID.");
-                }
-                break;
+                // delete blog
+                db.DeleteBlog(blog);
+                logger.Info($"Blog (id: {blog.BlogId}) deleted");
             }
-        case "4":
+        }
+        else if (choice == "6")
+        {
+            // edit blog
+            Console.WriteLine("Choose the blog to edit:");
+            var blog = GetBlog(db, logger);
+            if (blog != null)
             {
-                Menu.DisplaySelectBlogForViewingPostsMenu();
-                if (int.TryParse(Console.ReadLine(), out int blogId))
+                // input blog
+                Blog UpdatedBlog = InputBlog(db, logger);
+                if (UpdatedBlog != null)
                 {
-                    var postService = new PostServices(db);
-                    var posts = postService.GetPosts().Where(p => p.BlogId == blogId).ToList();
-
-                    if (posts.Any())
-                    {
-                        Console.WriteLine($"Total {posts.Count} post(s) found for blog ID {blogId}");
-                        foreach (var post in posts)
-                            Console.WriteLine($"Blog: {post.Blog.Name}, Title: {post.Title}, Content: {post.Content}");
-                    }
-                    else
-                    {
-                        Console.WriteLine("No posts found for this blog.");
-                    }
+                    UpdatedBlog.BlogId = blog.BlogId;
+                    db.EditBlog(UpdatedBlog);
+                    logger.Info($"Blog (id: {blog.BlogId}) updated");
                 }
-                else
-                {
-                    Console.WriteLine("Invalid input. Please enter a valid ID.");
-                }
-                break;
             }
-
-    }
-
-    Console.WriteLine("\nPress any key to continue...");
-    Console.ReadKey(true);
-    Console.Clear();
-    logger.Info("Program ended");
+        }
+        Console.WriteLine();
+    } while (choice.ToLower() != "q");
+}
+catch (Exception ex)
+{
+    logger.Error(ex.Message);
 }
 
+logger.Info("Program ended");
 
+static Blog GetBlog(BloggingContext db, Logger logger)
+{
+    // display all blogs
+    var blogs = db.Blogs.OrderBy(b => b.BlogId);
+    foreach (Blog b in blogs)
+    {
+        Console.WriteLine($"{b.BlogId}: {b.Name}");
+    }
+    if (int.TryParse(Console.ReadLine(), out int BlogId))
+    {
+        Blog blog = db.Blogs.FirstOrDefault(b => b.BlogId == BlogId);
+        if (blog != null)
+        {
+            return blog;
+        }
+    }
+    logger.Error("Invalid Blog Id");
+    return null;
+}
+
+static Blog InputBlog(BloggingContext db, Logger logger)
+{
+    Blog blog = new Blog();
+    Console.WriteLine("Enter the Blog name");
+    blog.Name = Console.ReadLine();
+
+    ValidationContext context = new ValidationContext(blog, null, null);
+    List<ValidationResult> results = new List<ValidationResult>();
+
+    var isValid = Validator.TryValidateObject(blog, context, results, true);
+    if (isValid)
+    {
+        // prevent duplicate blog names
+        if (db.Blogs.Any(b => b.Name == blog.Name))
+        {
+            // generate error
+            results.Add(new ValidationResult("Blog name exists", new string[] { "Name" }));
+        }
+        else
+        {
+            return blog;
+        }
+    }
+    foreach (var result in results)
+    {
+        logger.Error($"{result.MemberNames.First()} : {result.ErrorMessage}");
+    }
+
+    return null;
+}
